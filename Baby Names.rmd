@@ -1,0 +1,166 @@
+---
+title: 'HW on Handling Large Datasets: Analyzing Baby Names in the US'
+author: 'Karen Chik'
+output: html_document
+---
+
+
+####Data
+
+Acquire and analyze a real dataset on baby name popularity provided by the Social Security Administration.
+The data can be downloaded in zip format from:
+http://www.ssa.gov/oact/babynames/state/namesbystate.zip  (~22MB)
+
+
+#### Read csv files in folder
+
+Write a loop to read all files in folder
+```{r}
+setwd("/Users/Karen/Desktop/Github/namesbystate")
+file_list<-list.files()
+for(file in file_list){
+if (!exists("dataset")){
+    dataset <- read.table(file, header=FALSE, sep=",")}
+   
+  # if the merged dataset does exist, append to it
+  if (exists("dataset")){
+    temp_dataset <-read.table(file, header=FALSE, sep=",")
+    dataset<-rbind(dataset, temp_dataset)
+    rm(temp_dataset)}
+}
+
+colnames(dataset)<-c("State","Gender","Year","Name","Count")
+```
+
+#### Identify most popular baby names across both genders
+```{r}
+library(DT)
+library(dplyr)
+library(data.table)
+dt1<-data.table(summarize(group_by(dataset,Name),sum(Count)))
+idx<-which.max(dt1$`sum(Count)`)
+dt1[idx]
+
+```
+
+#### Identify most gender ambiguous names in 2013 and 1945
+Gender ambiguity metric= absolute value of male/female count - 1 per name, whichever name has ratio closest to 0 is the most gender ambiguous.
+
+```{r}
+
+yr13<-filter(dataset,Year==2013)
+
+Gender_Ambg= function (yr_df){
+  df=yr_df
+dt2<-data.table(summarize(group_by(df,Gender,Name),sum(Count)))
+dt2 <-  dt2 %>% group_by(Name) %>% filter(n()>1)
+male<-filter(dt2,Gender=='M')
+female<-filter(dt2,Gender=='F')
+uniq_name<-data.table(unique(male$Name))
+names(uniq_name)[1]<-"Name"
+
+uniq_name$Ratio<-abs(((male$`sum(Count)`/female$`sum(Count)`)-1))
+r_idx<-which(uniq_name$Ratio==min(uniq_name$Ratio))
+uniq_name[r_idx,]
+}
+Gender_Ambg(yr13)
+
+yr45<-filter(dataset,Year==1945)
+Gender_Ambg(yr45)
+```
+
+
+#### Identify names with the largest percentage increase and decrease in popularity since 1980
+
+```{r}
+yr80<-filter(dataset,Year==1980)
+yr15<-filter(dataset,Year==2015)
+
+dt3<-data.table(summarize(group_by(yr80,Name),sum(Count)))
+dt4<-data.table(summarize(group_by(yr15,Name),sum(Count)))
+for (j in 2:length(dt3)) {
+  Common_Names = merge(dt3,dt4,by="Name",all=TRUE)
+}
+colnames(Common_Names) <- c("Name","Count_1980","Count_2015")
+Common_Names$Pct_Change<- ((Common_Names$Count_2015)-(Common_Names$Count_1980))/(Common_Names$Count_1980)
+r_idx1<-which.max(Common_Names$Pct_Change)
+Increase<-Common_Names[r_idx1]
+r_idx2<-which.min(Common_Names$Pct_Change)
+Decrease<-Common_Names[r_idx2]
+
+Increase
+Decrease
+```
+
+
+#### Identify names with the largest percentage increase and decrease in popularity across all years
+```{r}
+
+PopName=function(beg_yr,end_yr){
+yrbeg<-filter(dataset,Year==beg_yr)
+yrend<-filter(dataset,Year==2015)
+yrbeg<-yrbeg%>%group_by(Name)%>%summarise(Count=sum(Count))
+yrend<-yrend%>%group_by(Name)%>%summarise(Count=sum(Count))
+Comm_Names = merge(yrbeg,yrend,by="Name",all=TRUE)
+colnames(Comm_Names) <- c("Name","Count_Beg","Count_2015")
+Comm_Names$Pct_Change<- ((Comm_Names$Count_2015)-(Comm_Names$Count_Beg))/(Comm_Names$Count_Beg)
+Comm_Names[which.max(Comm_Names$Pct_Change),]
+}
+
+NPopName=function(beg_yr,end_yr){
+yrbeg<-filter(dataset,Year==beg_yr)
+yrend<-filter(dataset,Year==2015)
+yrbeg<-yrbeg%>%group_by(Name)%>%summarise(Count=sum(Count))
+yrend<-yrend%>%group_by(Name)%>%summarise(Count=sum(Count))
+Comm_Names = merge(yrbeg,yrend,by="Name",all=TRUE)
+colnames(Comm_Names) <- c("Name","Count_Beg","Count_2015")
+Comm_Names$Pct_Change<- ((Comm_Names$Count_2015)-(Comm_Names$Count_Beg))/(Comm_Names$Count_Beg)
+r_idx2<-which.min(Comm_Names$Pct_Change)
+Comm_Names[r_idx2,]
+}
+Max_Names<-data.table(t(sapply(1910:2014, PopName,end_yr=2015)))
+Max_Names$Year<-(seq(1910,2014))
+Min_Names<-data.table(t(sapply(1910:2014, NPopName,end_yr=2015)))
+Min_Names$Year<-(seq(1910,2014))
+
+Max_Names[which.max(Max_Names$Pct_Change),] 
+Min_Names[which.min(Min_Names$Pct_Change),]
+
+
+```
+
+#### Growth of baby names based on US presidential terms
+
+```{r}
+library(data.table)
+library(xlsx)
+library(dplyr)
+library(tidyr)
+require(reshape)
+
+library(stringr)
+
+prez<-read.xlsx("US presidents listed.xlsx",1)
+prez<-data.table(prez)
+prez<-prez%>%separate(President, into=paste0(c("Name",1:3),sep=" "))
+colnames(prez)[1] <- "Year"
+colnames(prez)[2]<-"Name"
+prez<-subset(prez,select=c("Year","Name"))
+baby_yr<-data.table(dataset%>%group_by(Name,Year)%>%summarise(Count=sum(Count)))
+baby_yr = baby_yr %>% select(Year, Name, Count)
+baby_yr$Year<-as.factor(baby_yr$Year)
+prez$Year<-as.factor(prez$Year)
+Comm_Names<-data.table(merge(baby_yr,prez,by=c("Year","Name")))
+
+Pct_chg = function (x){
+  (x-lag(x))/lag(x)
+}
+p_chg<-data.table(Comm_Names%>%group_by(Name)%>%mutate_each(funs(Pct_chg),Count))
+p_chg<-na.omit(p_chg)
+p_chg%>%group_by(Name)%>%summarise(Count=sum(Count))
+```
+Interesting findings:
+27 babies were named (presumably) after President Obama in year 2009. 
+The highest increase of baby names during a presidential term was William and Lyndon.
+The highest decrease of baby names during a presidential term was Franklin.
+
